@@ -98,19 +98,19 @@ import warnings
 from dataclasses import asdict
 from functools import lru_cache
 from types import TracebackType
-from typing import IO, Generator, List, NoReturn, Optional, Set, Tuple, Type, Union
+from typing import IO, Generator, List, NoReturn, Optional, Set, Tuple, Type, Union, Any
 
 from tqdm import tqdm
 
 if sys.version_info < (3, 8):
     from typing_extensions import TypedDict
 else:
-    from typing import TypedDict
+    from typing import TypedDict, Any
 
 if sys.version_info < (3, 11):
     from typing_extensions import NotRequired
 else:
-    from typing import NotRequired
+    from typing import NotRequired, Any
 
 import filelock
 import mutagen
