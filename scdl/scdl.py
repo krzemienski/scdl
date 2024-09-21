@@ -722,7 +722,7 @@ def sync(
         sys.exit(0)
 
 
-def threaded_download_playlist(client, playlist, kwargs):
+def threaded_download_playlist(client: Any, playlist: Any, **kwargs: Any) -> None:
     """Spawns threads to download playlists concurrently."""
     num_threads = kwargs.get("threads", 1)  # Get number of threads from arguments
 
@@ -739,7 +739,7 @@ def threaded_download_playlist(client, playlist, kwargs):
                 future.result()  # Wait for all downloads to complete
 
 
-def download_track_in_playlist(client, track, kwargs, playlist_info):
+def download_track_in_playlist(client: Any, track: Any, playlist_info: Any, **kwargs: Any) -> None:
     """Helper function to download a single track within a playlist."""
     playlist_info = {
         "author": playlist_info.user.username,
@@ -1047,7 +1047,7 @@ def download_hls(
     return filename, False
 
 
-def threaded_download_track(client, track, kwargs):
+def threaded_download_track(client: Any, track: Any, **kwargs: Any) -> None:
     """Spawns threads to download tracks concurrently."""
     num_threads = kwargs.get("threads", 1)  # Get number of threads from arguments
 
