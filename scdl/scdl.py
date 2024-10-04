@@ -1040,17 +1040,78 @@ def download_hls(
     return filename, False
 
 
-def threaded_download_track(client: SCDLClient, track: TrackType, **kwargs: SCDLArgs) -> None:
-    """Spawns threads to download tracks concurrently."""
-    num_threads = kwargs.get("threads", 1)  # Get number of threads from arguments
+def threaded_download_playlist(
+    client: SoundCloud,
+    playlist: Union[AlbumPlaylist, BasicAlbumPlaylist],
+    kwargs: SCDLArgs,  # No unpacking, pass the dictionary directly
+) -> None:
+    """Handles downloading of a playlist with multi-threading support."""
+    num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
+    playlist_info = {
+        "author": playlist.user.username,
+        "id": playlist.id,
+        "title": playlist.title,
+        "tracknumber_int": 0,
+        "tracknumber": "0",
+        "tracknumber_total": playlist.track_count,
+    }
+    if not kwargs.get("no_playlist_folder"):
+        playlist_name = sanitize_str(playlist.title.encode("utf-8", "ignore").decode("utf-8"))
+        if not os.path.exists(playlist_name):
+            os.makedirs(playlist_name)
+        os.chdir(playlist_name)
 
-    # If only 1 thread is specified, call download_track directly
+    try:
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = []
+            offset = kwargs.get("playlist_offset", 0) if isinstance(kwargs.get("playlist_offset"), int) else 0
+            for idx, track in enumerate(playlist.tracks[offset:], start=offset):
+                playlist_info["tracknumber_int"] = idx + 1
+                playlist_info["tracknumber"] = str(idx + 1)
+                futures.append(
+                    executor.submit(
+                        download_track_in_playlist,
+                        client,
+                        track,
+                        playlist_info.copy(),
+                        kwargs  # Pass kwargs directly as it's of type SCDLArgs
+                    )
+                )
+
+            # Use tqdm to show progress
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Playlist"):
+                try:
+                    future.result()  # Raises exception if the thread failed
+                except Exception as e:
+                    logger.error(f"Error downloading track: {e}")
+                    if kwargs.get("strict_playlist"):
+                        sys.exit(1)
+    finally:
+        if not kwargs.get("no_playlist_folder"):
+            os.chdir("..")
+
+
+def threaded_download_track(
+    client: SoundCloud,
+    track: Union[BasicTrack, Track],
+    kwargs: SCDLArgs,  # No unpacking, pass the dictionary directly
+) -> None:
+    """Handles downloading of a single track with optional multi-threading."""
+    num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
     if num_threads == 1:
         download_track(client, track, kwargs)
     else:
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            executor.submit(download_track, client, track, kwargs)
+            futures = [executor.submit(download_track, client, track, kwargs)]
 
+            # Use tqdm to show progress for single track downloads
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Tracks"):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Error downloading track: {e}")
+                    if kwargs.get("strict_playlist"):
+                        sys.exit(1)
 
 def download_track(
     client: SoundCloud,
