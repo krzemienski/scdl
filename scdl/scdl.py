@@ -1,4 +1,4 @@
-"""scdl allows you to download music from SoundCloud
+"""scdl allows you to download music from Soundcloud
 
 Usage:
     scdl (-l <track_url> | -s <search_query> | me) [-a | -f | -C | -t | -p | -r]
@@ -75,12 +75,9 @@ Options:
     --threads <N>                   Number of concurrent downloads (default: 1)
 """
 
-from dataclasses import asdict
-from functools import lru_cache
-from types import TracebackType
-from typing import IO, Generator, List, NoReturn, Optional, Set, Tuple, Type, Union, Any
 import atexit
 import configparser
+from configparser import ConfigParser
 import contextlib
 import io
 import itertools
@@ -99,25 +96,25 @@ import traceback
 import typing
 import urllib.parse
 import warnings
+from dataclasses import asdict
+from functools import lru_cache
+from types import TracebackType
+from typing import IO, Generator, List, NoReturn, Optional, Set, Tuple, Type, Union
 
-from tqdm import tqdm
 
 if sys.version_info < (3, 8):
     from typing_extensions import TypedDict
 else:
-    from typing import TypedDict, Any
+    from typing import Optional, TypedDict
 
 if sys.version_info < (3, 11):
     from typing_extensions import NotRequired
 else:
-    from typing import NotRequired, Any
+    from typing import Optional, NotRequired
 
 import filelock
 import mutagen
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-
 from docopt import docopt
 from pathvalidate import sanitize_filename
 from soundcloud import (
@@ -185,7 +182,7 @@ class SCDLArgs(TypedDict):
     no_playlist: bool
     no_playlist_folder: bool
     o: Optional[int]
-    offset: NotRequired[int]
+        offset: Optional[int]
     only_original: bool
     onlymp3: bool
     opus: bool
@@ -196,14 +193,14 @@ class SCDLArgs(TypedDict):
     p: bool
     path: Optional[str]
     playlist_name_format: str
-    playlist_offset: NotRequired[int]
+    playlist_    offset: Optional[int]
     r: bool
     remove: bool
     strict_playlist: bool
     sync: Optional[str]
     s: Optional[str]
     t: bool
-    threads: int  # Added threads argument
+        threads: int
 
 
 class PlaylistInfo(TypedDict):
@@ -307,7 +304,7 @@ def main() -> None:
     # import conf file
     config = get_config(config_file)
 
-    logger.info("SoundCloud Downloader")
+    logger.info("Soundcloud Downloader")
     logger.debug(arguments)
 
     client_id = arguments["--client-id"] or config["scdl"]["client_id"]
@@ -412,13 +409,13 @@ def main() -> None:
             logger.error(f"Invalid sync archive file {arguments['--sync']}")
             sys.exit(1)
 
-    # Convert arguments dict to python_args (kwargs-friendly args)
+    # convert arguments dict to python_args (kwargs-friendly args)
     python_args = {}
     for key, value in arguments.items():
         key = key.strip("-").replace("-", "_")
         python_args[key] = value
 
-    # Change download path
+    # change download path
     dl_path: str = arguments["--path"] or config["scdl"]["path"]
     if os.path.exists(dl_path):
         os.chdir(dl_path)
@@ -452,13 +449,13 @@ def validate_url(client: SoundCloud, url: str) -> str:
     if url.startswith(("https://soundcloud.com", "http://soundcloud.com")):
         return urllib.parse.urljoin(url, urllib.parse.urlparse(url).path)
 
-    # See if link redirects to soundcloud.com
+    # see if link redirects to soundcloud.com
     try:
         resp = requests.get(url)
-        if resp.url.startswith(("https://soundcloud.com", "http://soundcloud.com")):
+        if url.startswith(("https://soundcloud.com", "http://soundcloud.com")):
             return urllib.parse.urljoin(resp.url, urllib.parse.urlparse(resp.url).path)
     except Exception:
-        # See if given a username instead of url
+        # see if given a username instead of url
         if client.resolve(f"https://soundcloud.com/{url}"):
             return f"https://soundcloud.com/{url}"
 
@@ -490,16 +487,16 @@ def get_config(config_file: pathlib.Path) -> configparser.ConfigParser:
     default_config_file = pathlib.Path(__file__).with_name("scdl.cfg")
 
     with get_filelock(config_file):
-        # Load default config first
+        # load default config first
         with open(default_config_file, encoding="UTF-8") as f:
             config.read_file(f)
 
-        # Load config file if it exists
+        # load config file if it exists
         if config_file.exists():
             with open(config_file, encoding="UTF-8") as f:
                 config.read_file(f)
 
-        # Save config to disk
+        # save config to disk
         config_file.parent.mkdir(parents=True, exist_ok=True)
         with open(config_file, "w", encoding="UTF-8") as f:
             config.write(f)
@@ -510,9 +507,9 @@ def get_config(config_file: pathlib.Path) -> configparser.ConfigParser:
 def truncate_str(s: str, length: int) -> str:
     """Truncate string to a certain number of bytes using the file system encoding"""
     encoding = sys.getfilesystemencoding()
-    bytes_s = s.encode(encoding)
-    bytes_s = bytes_s[:length]
-    return bytes_s.decode(encoding, errors="ignore")
+    bytes = s.encode(encoding)
+    bytes = bytes[:length]
+    return bytes.decode(encoding, errors="ignore")
 
 
 def sanitize_str(
@@ -550,11 +547,11 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
         sys.exit(1)
     elif isinstance(item, Track):
         logger.info("Found a track")
-        threaded_download_track(client, item, **kwargs)
+        threaded_download_track(client, item, kwargs)
     elif isinstance(item, AlbumPlaylist):
         logger.info("Found a playlist")
         kwargs["playlist_offset"] = offset
-        threaded_download_playlist(client, item, **kwargs)
+        threaded_download_playlist(client, item, kwargs)
     elif isinstance(item, User):
         user = item
         logger.info("Found a user profile")
@@ -564,11 +561,15 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
             for i, like in itertools.islice(enumerate(likes, 1), offset, None):
                 logger.info(f"like n°{i} of {user.likes_count}")
                 if isinstance(like, TrackLike):
-                    threaded_download_track(client, like.track, **kwargs)
+                    threaded_download_track(
+                        client,
+                        like.track,
+                        kwargs,
+                    )
                 elif isinstance(like, PlaylistLike):
                     playlist = client.get_playlist(like.playlist.id)
                     assert playlist is not None
-                    threaded_download_playlist(client, playlist, **kwargs)
+                    threaded_download_playlist(client, playlist, kwargs)
                 else:
                     logger.error(f"Unknown like type {like}")
                     if kwargs.get("strict_playlist"):
@@ -581,14 +582,18 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
                 logger.info(f"comment n°{i} of {user.comments_count}")
                 track = client.get_track(comment.track.id)
                 assert track is not None
-                threaded_download_track(client, track, **kwargs)
+                threaded_download_track(
+                    client,
+                    track,
+                    kwargs,
+                )
             logger.info(f"Downloaded all commented tracks of user {user.username}!")
         elif kwargs.get("t"):
             logger.info(f"Retrieving all tracks of user {user.username}...")
             tracks = client.get_user_tracks(user.id, limit=1000)
             for i, track in itertools.islice(enumerate(tracks, 1), offset, None):
                 logger.info(f"track n°{i} of {user.track_count}")
-                threaded_download_track(client, track, **kwargs)
+                threaded_download_track(client, track, kwargs)
             logger.info(f"Downloaded all tracks of user {user.username}!")
         elif kwargs.get("a"):
             logger.info(f"Retrieving all tracks & reposts of user {user.username}...")
@@ -599,9 +604,13 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
                     f"{user.track_count + user.reposts_count if user.reposts_count else '?'}",
                 )
                 if isinstance(stream_item, (TrackStreamItem, TrackStreamRepostItem)):
-                    threaded_download_track(client, stream_item.track, **kwargs)
+                    threaded_download_track(
+                        client,
+                        stream_item.track,
+                        kwargs,
+                    )
                 elif isinstance(stream_item, (PlaylistStreamItem, PlaylistStreamRepostItem)):
-                    threaded_download_playlist(client, stream_item.playlist, **kwargs)
+                    threaded_download_playlist(client, stream_item.playlist, kwargs)
                 else:
                     logger.error(f"Unknown item type {stream_item.type}")
                     if kwargs.get("strict_playlist"):
@@ -612,7 +621,7 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
             playlists = client.get_user_playlists(user.id, limit=1000)
             for i, playlist in itertools.islice(enumerate(playlists, 1), offset, None):
                 logger.info(f"playlist n°{i} of {user.playlist_count}")
-                threaded_download_playlist(client, playlist, **kwargs)
+                threaded_download_playlist(client, playlist, kwargs)
             logger.info(f"Downloaded all playlists of user {user.username}!")
         elif kwargs.get("r"):
             logger.info(f"Retrieving all reposts of user {user.username}...")
@@ -620,9 +629,13 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
             for i, repost in itertools.islice(enumerate(reposts, 1), offset, None):
                 logger.info(f"item n°{i} of {user.reposts_count or '?'}")
                 if isinstance(repost, TrackStreamRepostItem):
-                    threaded_download_track(client, repost.track, **kwargs)
+                    threaded_download_track(
+                        client,
+                        repost.track,
+                        kwargs,
+                    )
                 elif isinstance(repost, PlaylistStreamRepostItem):
-                    threaded_download_playlist(client, repost.playlist, **kwargs)
+                    threaded_download_playlist(client, repost.playlist, kwargs)
                 else:
                     logger.error(f"Unknown item type {repost.type}")
                     if kwargs.get("strict_playlist"):
@@ -635,88 +648,6 @@ def download_url(client: SoundCloud, kwargs: SCDLArgs) -> None:
         logger.error(f"Unknown item type {item.kind}")
         sys.exit(1)
 
-
-def threaded_download_playlist(
-    client: SoundCloud,
-    playlist: Union[AlbumPlaylist, BasicAlbumPlaylist],
-    **kwargs: SCDLArgs,
-) -> None:
-    """Handles downloading of a playlist with multi-threading support."""
-    num_threads = kwargs.get("threads", 1)
-    playlist_info = {
-        "author": playlist.user.username,
-        "id": playlist.id,
-        "title": playlist.title,
-        "tracknumber_int": 0,
-        "tracknumber": "0",
-        "tracknumber_total": playlist.track_count,
-    }
-    if not kwargs.get("no_playlist_folder"):
-        playlist_name = sanitize_str(playlist.title.encode("utf-8", "ignore").decode("utf-8"))
-        if not os.path.exists(playlist_name):
-            os.makedirs(playlist_name)
-        os.chdir(playlist_name)
-
-    try:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = []
-            offset = kwargs.get("playlist_offset", 0)
-            for idx, track in enumerate(playlist.tracks[offset:], start=offset):
-                playlist_info["tracknumber_int"] = idx + 1
-                playlist_info["tracknumber"] = str(idx + 1)
-                futures.append(
-                    executor.submit(
-                        download_track_in_playlist,
-                        client,
-                        track,
-                        playlist_info.copy(),
-                        kwargs,
-                    )
-                )
-
-            # Use tqdm to show progress
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Playlist"):
-                try:
-                    future.result()  # Raises exception if the thread failed
-                except Exception as e:
-                    logger.error(f"Error downloading track: {e}")
-                    if kwargs.get("strict_playlist"):
-                        sys.exit(1)
-    finally:
-        if not kwargs.get("no_playlist_folder"):
-            os.chdir("..")
-
-
-def threaded_download_track(
-    client: SoundCloud,
-    track: Union[BasicTrack, Track],
-    **kwargs: SCDLArgs,
-) -> None:
-    """Handles downloading of a single track with optional multi-threading."""
-    num_threads = kwargs.get("threads", 1)
-    if num_threads == 1:
-        download_track(client, track, kwargs)
-    else:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(download_track, client, track, kwargs)]
-
-            # Use tqdm to show progress for single track downloads
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Tracks"):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Error downloading track: {e}")
-                    if kwargs.get("strict_playlist"):
-                        sys.exit(1)
-
-def download_track_in_playlist(
-    client: SoundCloud,
-    track: Union[BasicTrack, Track],
-    playlist_info: PlaylistInfo,
-    kwargs: SCDLArgs,
-) -> None:
-    """Helper function to download a single track within a playlist."""
-    download_track(client, track, kwargs, playlist_info)
 
 def remove_files() -> None:
     """Removes any pre-existing tracks that were not just downloaded"""
@@ -789,6 +720,86 @@ def sync(
             return tuple(track for track in playlist.tracks if track.id in add)
         logger.info("No tracks to download. Exiting...")
         sys.exit(0)
+
+
+    """Spawns threads to download playlists concurrently."""
+        num_threads = int(kwargs.get("threads", 1))
+
+    # If only 1 thread is specified, call download_playlist directly
+    if num_threads == 1:
+        download_playlist(client, playlist, kwargs)
+    else:
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [
+                executor.submit(download_track_in_playlist, client, track, kwargs, playlist)
+                for track in playlist.tracks
+            ]
+            for future in futures:
+                future.result()  # Wait for all downloads to complete
+
+
+def download_track_in_playlist(
+    client: SoundCloud,
+    track: Union[BasicTrack, Track],
+    playlist_info: PlaylistInfo,
+    kwargs: SCDLArgs,
+) -> None:
+    """Helper function to download a single track within a playlist."""
+    playlist_info = {
+        "author": playlist_info.user.username,
+        "id": playlist_info.id,
+        "title": playlist_info.title,
+        "tracknumber_int": playlist_info.tracks.index(track) + 1,
+        "tracknumber": str(playlist_info.tracks.index(track) + 1),
+        "tracknumber_total": playlist_info.track_count,
+    }
+    download_track(client, track, kwargs, playlist_info)
+
+
+def download_playlist(
+    client: SoundCloud,
+    playlist: Union[AlbumPlaylist, BasicAlbumPlaylist],
+    kwargs: SCDLArgs,
+) -> None:
+    """Downloads a playlist"""
+    if kwargs.get("no_playlist"):
+        logger.info("Skipping playlist...")
+        return
+    playlist_name = playlist.title.encode("utf-8", "ignore").decode("utf-8")
+    playlist_name = sanitize_str(playlist_name)
+    playlist_info: PlaylistInfo = {
+        "author": playlist.user.username,
+        "id": playlist.id,
+        "title": playlist.title,
+        "tracknumber_int": 0,
+        "tracknumber": "0",
+        "tracknumber_total": playlist.track_count,
+    }
+
+    if not kwargs.get("no_playlist_folder"):
+        if not os.path.exists(playlist_name):
+            os.makedirs(playlist_name)
+        os.chdir(playlist_name)
+
+    try:
+        n = kwargs.get("n")
+        if n is not None:  # Order by creation date and get the n lasts tracks
+            playlist.tracks = tuple(
+                sorted(playlist.tracks, key=lambda track: track.id, reverse=True)[: int(n)],
+            )
+            kwargs["playlist_offset"] = 0
+        s = kwargs.get("sync")
+        if s:
+            if os.path.isfile(s):
+                playlist.tracks = sync(client, playlist, playlist_info, kwargs)
+            else:
+                logger.error(f'Invalid sync archive file {kwargs.get("sync")}')
+                sys.exit(1)
+
+        threaded_download_playlist(client, playlist, kwargs)
+    finally:
+        if not kwargs.get("no_playlist_folder"):
+            os.chdir("..")
 
 
 def try_utime(path: str, filetime: float) -> None:
@@ -1040,78 +1051,16 @@ def download_hls(
     return filename, False
 
 
-def threaded_download_playlist(
-    client: SoundCloud,
-    playlist: Union[AlbumPlaylist, BasicAlbumPlaylist],
-    kwargs: SCDLArgs,  # No unpacking, pass the dictionary directly
-) -> None:
-    """Handles downloading of a playlist with multi-threading support."""
-    num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
-    playlist_info = {
-        "author": playlist.user.username,
-        "id": playlist.id,
-        "title": playlist.title,
-        "tracknumber_int": 0,
-        "tracknumber": "0",
-        "tracknumber_total": playlist.track_count,
-    }
-    if not kwargs.get("no_playlist_folder"):
-        playlist_name = sanitize_str(playlist.title.encode("utf-8", "ignore").decode("utf-8"))
-        if not os.path.exists(playlist_name):
-            os.makedirs(playlist_name)
-        os.chdir(playlist_name)
+    """Spawns threads to download tracks concurrently."""
+        num_threads = int(kwargs.get("threads", 1))
 
-    try:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = []
-            offset = kwargs.get("playlist_offset", 0) if isinstance(kwargs.get("playlist_offset"), int) else 0
-            for idx, track in enumerate(playlist.tracks[offset:], start=offset):
-                playlist_info["tracknumber_int"] = idx + 1
-                playlist_info["tracknumber"] = str(idx + 1)
-                futures.append(
-                    executor.submit(
-                        download_track_in_playlist,
-                        client,
-                        track,
-                        playlist_info.copy(),
-                        kwargs  # Pass kwargs directly as it's of type SCDLArgs
-                    )
-                )
-
-            # Use tqdm to show progress
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Playlist"):
-                try:
-                    future.result()  # Raises exception if the thread failed
-                except Exception as e:
-                    logger.error(f"Error downloading track: {e}")
-                    if kwargs.get("strict_playlist"):
-                        sys.exit(1)
-    finally:
-        if not kwargs.get("no_playlist_folder"):
-            os.chdir("..")
-
-
-def threaded_download_track(
-    client: SoundCloud,
-    track: Union[BasicTrack, Track],
-    kwargs: SCDLArgs,  # No unpacking, pass the dictionary directly
-) -> None:
-    """Handles downloading of a single track with optional multi-threading."""
-    num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
+    # If only 1 thread is specified, call download_track directly
     if num_threads == 1:
         download_track(client, track, kwargs)
     else:
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(download_track, client, track, kwargs)]
+            executor.submit(download_track, client, track, kwargs)
 
-            # Use tqdm to show progress for single track downloads
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Tracks"):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Error downloading track: {e}")
-                    if kwargs.get("strict_playlist"):
-                        sys.exit(1)
 
 def download_track(
     client: SoundCloud,
