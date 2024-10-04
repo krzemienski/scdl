@@ -193,14 +193,14 @@ class SCDLArgs(TypedDict):
     p: bool
     path: Optional[str]
     playlist_name_format: str
-    playlist_    offset: Optional[int]
+    playlist_offset: Optional[int]
     r: bool
     remove: bool
     strict_playlist: bool
     sync: Optional[str]
     s: Optional[str]
     t: bool
-        threads: int
+    threads: int
 
 
 class PlaylistInfo(TypedDict):
@@ -723,7 +723,7 @@ def sync(
 
 
     """Spawns threads to download playlists concurrently."""
-        num_threads = int(kwargs.get("threads", 1))
+    num_threads = int(kwargs.get("threads", 1))
 
     # If only 1 thread is specified, call download_playlist directly
     if num_threads == 1:
@@ -1052,7 +1052,7 @@ def download_hls(
 
 
     """Spawns threads to download tracks concurrently."""
-        num_threads = int(kwargs.get("threads", 1))
+    num_threads = int(kwargs.get("threads", 1))
 
     # If only 1 thread is specified, call download_track directly
     if num_threads == 1:
