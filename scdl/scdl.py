@@ -182,7 +182,7 @@ class SCDLArgs(TypedDict):
     no_playlist: bool
     no_playlist_folder: bool
     o: Optional[int]
-        offset: Optional[int]
+    offset: Optional[int]
     only_original: bool
     onlymp3: bool
     opus: bool
