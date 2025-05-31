@@ -38,6 +38,9 @@ scdl -l https://soundcloud.com/pandadub/sets/the-lost-ship --sync archive.txt
 
 # Download your likes (with authentification token)
 scdl me -f
+
+# Download playlist using 8 concurrent threads
+scdl -l https://soundcloud.com/pandadub/sets/the-lost-ship --threads 8
 ```
 
 ## Options:
@@ -91,6 +94,7 @@ scdl me -f
 --add-description               Adds the description to a seperate txt file (can be read by some players)
 --no-playlist                   Skip downloading playlists
 --opus                          Prefer downloading opus streams over mp3 streams
+--threads [num]                 Number of threads to use for concurrent downloads in playlists. Default is 4
 ```
 
 
@@ -105,3 +109,4 @@ scdl me -f
 * Sync Playlist
 * Set the tags with mutagen (Title / Artist / Album / Artwork)
 * Create playlist files when downloading a playlist
+* Concurrent downloads for faster playlist downloading (configurable number of threads)

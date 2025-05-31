@@ -166,3 +166,56 @@ def test_sync(tmp_path: Path) -> None:
     assert_not_track(tmp_path / "test playlist", "Wan Bushi - Eurodance Vibes (part 1+2+3).mp3")
     with open("archive.txt") as f:
         assert f.read().split() == ["1855267053", "1855318536"]
+
+
+def test_concurrent_download(tmp_path: Path) -> None:
+    """Test playlist download with multiple threads"""
+    os.chdir(tmp_path)
+    r = call_scdl_with_auth(
+        "-l",
+        "https://soundcloud.com/one-thousand-and-one/sets/test-playlist/s-ZSLfNrbPoXR",
+        "--playlist-name-format",
+        "{playlist[tracknumber]}_{title}",
+        "--onlymp3",
+        "--threads",
+        "2",
+    )
+    assert r.returncode == 0
+    assert_track_playlist_1(tmp_path)
+    assert_track_playlist_2(tmp_path)
+
+
+def test_single_thread_download(tmp_path: Path) -> None:
+    """Test playlist download with single thread (sequential)"""
+    os.chdir(tmp_path)
+    r = call_scdl_with_auth(
+        "-l",
+        "https://soundcloud.com/one-thousand-and-one/sets/test-playlist/s-ZSLfNrbPoXR",
+        "--playlist-name-format",
+        "{playlist[tracknumber]}_{title}",
+        "--onlymp3",
+        "--threads",
+        "1",
+    )
+    assert r.returncode == 0
+    assert_track_playlist_1(tmp_path)
+    assert_track_playlist_2(tmp_path)
+
+
+def test_concurrent_strict_playlist(tmp_path: Path) -> None:
+    """Test concurrent download with strict playlist (should fail on error)"""
+    os.chdir(tmp_path)
+    r = call_scdl_with_auth(
+        "-l",
+        "https://soundcloud.com/one-thousand-and-one/sets/test-playlist/s-ZSLfNrbPoXR",
+        "--playlist-name-format",
+        "{playlist[tracknumber]}_{title}",
+        "--onlymp3",
+        "--max-size=10kb",
+        "--strict-playlist",
+        "--threads",
+        "2",
+    )
+    assert r.returncode == 1
+    # In strict mode with concurrent downloads, some tracks might download before error
+    # but process should still exit with error code

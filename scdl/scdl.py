@@ -9,7 +9,7 @@ Usage:
     [--original-name][--original-metadata][--no-original][--only-original]
     [--name-format <format>][--strict-playlist][--playlist-name-format <format>]
     [--client-id <id>][--auth-token <token>][--overwrite][--no-playlist][--opus]
-    [--add-description]
+    [--add-description][--threads <num>]
 
     scdl -h | --help
     scdl --version
@@ -72,9 +72,12 @@ Options:
     --no-playlist                   Skip downloading playlists
     --add-description               Adds the description to a separate txt file
     --opus                          Prefer downloading opus streams over mp3 streams
+    --threads [num]                 Number of threads to use for concurrent downloads
+                                    in playlists. Default is 4
 """
 
 import atexit
+import concurrent.futures
 import configparser
 import contextlib
 import io
@@ -194,6 +197,7 @@ class SCDLArgs(TypedDict):
     sync: Optional[str]
     s: Optional[str]
     t: bool
+    threads: Optional[int]
 
 
 class PlaylistInfo(TypedDict):
@@ -426,6 +430,18 @@ def main() -> None:
         except Exception:
             logger.error(f"Invalid sync archive file {arguments['--sync']}")
             sys.exit(1)
+
+    if arguments["--threads"] is not None:
+        try:
+            arguments["--threads"] = int(arguments["--threads"])
+            if arguments["--threads"] < 1:
+                raise ValueError
+        except Exception:
+            logger.error("Number of threads should be a positive integer...")
+            sys.exit(1)
+        logger.debug("threads: %d", arguments["--threads"])
+    else:
+        arguments["--threads"] = 4  # Default to 4 threads
 
     # convert arguments dict to python_args (kwargs-friendly args)
     python_args = {}
@@ -785,28 +801,99 @@ def download_playlist(
                 sys.exit(1)
 
         tracknumber_digits = len(str(len(playlist.tracks)))
-        for counter, track in itertools.islice(
+
+        # Get number of threads from kwargs
+        num_threads = kwargs.get("threads", 4)
+
+        # If only one thread requested or a single track, use sequential download
+        tracks_to_download = list(itertools.islice(
             enumerate(playlist.tracks, 1),
             kwargs.get("playlist_offset", 0),
             None,
-        ):
-            logger.debug(track)
-            logger.info(f"Track n°{counter}")
-            playlist_info["tracknumber_int"] = counter
-            playlist_info["tracknumber"] = str(counter).zfill(tracknumber_digits)
-            if isinstance(track, MiniTrack):
-                if playlist.secret_token:
-                    track = client.get_tracks([track.id], playlist.id, playlist.secret_token)[0]
+        ))
+
+        if num_threads == 1 or len(tracks_to_download) == 1:
+            # Sequential download (original behavior)
+            for counter, track in tracks_to_download:
+                logger.debug(track)
+                logger.info(f"Track n°{counter}")
+                playlist_info["tracknumber_int"] = counter
+                playlist_info["tracknumber"] = str(counter).zfill(tracknumber_digits)
+                if isinstance(track, MiniTrack):
+                    if playlist.secret_token:
+                        track = client.get_tracks([track.id], playlist.id, playlist.secret_token)[0]
+                    else:
+                        track = client.get_track(track.id)  # type: ignore[assignment]
+                assert isinstance(track, BasicTrack)
+                download_track(
+                    client,
+                    track,
+                    kwargs,
+                    playlist_info,
+                    kwargs["strict_playlist"],
+                )
+        else:
+            # Concurrent download using thread pool
+            logger.info(f"Downloading playlist tracks using {num_threads} threads")
+
+            def download_track_wrapper(
+                track_data: Tuple[int, Union[BasicTrack, MiniTrack]],
+            ) -> None:
+                counter, track = track_data
+                try:
+                    # Create a copy of playlist_info for this track
+                    track_playlist_info = playlist_info.copy()
+                    track_playlist_info["tracknumber_int"] = counter
+                    track_playlist_info["tracknumber"] = str(counter).zfill(tracknumber_digits)
+
+                    logger.debug(track)
+                    logger.info(f"Track n°{counter}")
+
+                    if isinstance(track, MiniTrack):
+                        if playlist.secret_token:
+                            track = client.get_tracks(
+                                [track.id], playlist.id, playlist.secret_token
+                            )[0]
+                        else:
+                            track = client.get_track(track.id)  # type: ignore[assignment]
+                    assert isinstance(track, BasicTrack)
+
+                    download_track(
+                        client,
+                        track,
+                        kwargs,
+                        track_playlist_info,
+                        False,  # Don't exit on fail in concurrent mode, handle after
+                    )
+                except Exception as e:
+                    logger.error(f"Error downloading track {counter}: {e}")
+                    if kwargs["strict_playlist"]:
+                        raise
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = []
+                for track_data in tracks_to_download:
+                    future = executor.submit(download_track_wrapper, track_data)
+                    futures.append(future)
+
+                # Wait for all downloads to complete
+                # If strict playlist mode, we'll cancel remaining on first error
+                if kwargs["strict_playlist"]:
+                    try:
+                        # Wait for all futures to complete
+                        for future in futures:
+                            future.result()
+                    except Exception:
+                        # Cancel remaining futures
+                        for f in futures:
+                            f.cancel()
+                        raise
                 else:
-                    track = client.get_track(track.id)  # type: ignore[assignment]
-            assert isinstance(track, BasicTrack)
-            download_track(
-                client,
-                track,
-                kwargs,
-                playlist_info,
-                kwargs["strict_playlist"],
-            )
+                    # In non-strict mode, just wait for all to complete
+                    # Errors are already logged in download_track_wrapper
+                    for future in concurrent.futures.as_completed(futures):
+                        with contextlib.suppress(Exception):
+                            future.result()
     finally:
         if not kwargs.get("no_playlist_folder"):
             os.chdir("..")
