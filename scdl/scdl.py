@@ -441,22 +441,11 @@ def threaded_download_track(
     playlist_info: Optional[PlaylistInfo] = None,
     exit_on_fail: bool = True,
 ) -> None:
-    """Handles downloading of a single track with optional multi-threading."""
-    num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
-    if num_threads == 1:
-        download_track(client, track, kwargs, playlist_info, exit_on_fail)
-    else:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(download_track, client, track, kwargs, playlist_info,exit_on_fail)]
-
-            # Use tqdm to show progress for single track downloads
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading Tracks"):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Error downloading track: {e}")
-                    if kwargs.get("strict_playlist"):
-                        sys.exit(1)
+    """
+    Downloads a single track. For playlists, use download_playlist which handles parallel downloads.
+    Single tracks don't benefit from threading as there's only one file to download.
+    """
+    download_track(client, track, kwargs, playlist_info, exit_on_fail)
 
 def validate_url(client: SoundCloud, url: str) -> str:
     """If url is a valid soundcloud.com url, return it.
@@ -751,7 +740,7 @@ def download_playlist(
     playlist: Union[AlbumPlaylist, BasicAlbumPlaylist],
     kwargs: SCDLArgs,
 ) -> None:
-    """Downloads a playlist"""
+    """Downloads a playlist with multi-threading support"""
     if kwargs.get("no_playlist"):
         logger.info("Skipping playlist...")
         return
@@ -786,29 +775,52 @@ def download_playlist(
                 logger.error(f'Invalid sync archive file {kwargs.get("sync")}')
                 sys.exit(1)
 
+        # Collect all tracks for parallel download
+        num_threads = kwargs.get("threads", 1) if isinstance(kwargs.get("threads"), int) else 1
+        tracks_to_download = []
         tracknumber_digits = len(str(len(playlist.tracks)))
+        
         for counter, track in itertools.islice(
             enumerate(playlist.tracks, 1),
             kwargs.get("playlist_offset", 0),
             None,
         ):
             logger.debug(track)
-            logger.info(f"Track n°{counter}")
-            playlist_info["tracknumber_int"] = counter
-            playlist_info["tracknumber"] = str(counter).zfill(tracknumber_digits)
+            playlist_info_copy = playlist_info.copy()
+            playlist_info_copy["tracknumber_int"] = counter
+            playlist_info_copy["tracknumber"] = str(counter).zfill(tracknumber_digits)
+            
             if isinstance(track, MiniTrack):
                 if playlist.secret_token:
                     track = client.get_tracks([track.id], playlist.id, playlist.secret_token)[0]
                 else:
                     track = client.get_track(track.id)  # type: ignore[assignment]
             assert isinstance(track, BasicTrack)
-            threaded_download_track(
-                client,
-                track,
-                kwargs,
-                playlist_info,
-                kwargs["strict_playlist"],
-            )
+            
+            tracks_to_download.append((track, playlist_info_copy))
+        
+        # Download tracks in parallel
+        if num_threads > 1 and len(tracks_to_download) > 1:
+            logger.info(f"Downloading {len(tracks_to_download)} tracks with {num_threads} threads")
+            with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                futures = []
+                for track, pinfo in tracks_to_download:
+                    future = executor.submit(download_track, client, track, kwargs, pinfo, kwargs["strict_playlist"])
+                    futures.append(future)
+                
+                # Monitor progress
+                for future in tqdm(as_completed(futures), total=len(futures), desc="Downloading playlist"):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"Error downloading track: {e}")
+                        if kwargs.get("strict_playlist"):
+                            sys.exit(1)
+        else:
+            # Single-threaded download
+            for i, (track, pinfo) in enumerate(tracks_to_download, 1):
+                logger.info(f"Track n°{i}")
+                download_track(client, track, kwargs, pinfo, kwargs["strict_playlist"])
     finally:
         if not kwargs.get("no_playlist_folder"):
             os.chdir("..")
